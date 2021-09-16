@@ -69,4 +69,4 @@ E.x.:
 truffle migrate --network kovan
 ```
 
-## For more info about the protocol, please refer to our docs here: https://app.gitbook.com/@definer/s/definer/
+
