@@ -1,4 +1,4 @@
-var tokenData = require("../test-helpers/tokenData.json");
+var tokenData = require("../test-helpers/OKExChainData.json");
 // var compound = require("../compound-protocol/networks/development.json");
 
 const { BN } = require("@openzeppelin/test-helpers");
@@ -28,6 +28,10 @@ const MockERC20 = artifacts.require("MockERC20");
 const MockCToken = artifacts.require("MockCToken");
 const MockChainLinkAggregator = artifacts.require("MockChainLinkAggregator");
 
+// ExOracle
+const ExOracle = artifacts.require("ExOracle");
+const ExOracleFIN = artifacts.require("ExOracleFIN");
+
 // This is to resolve "Invalid JSON RPC response" error when using expectRevert.
 // Code taken from
 // https://forum.openzeppelin.com/t/error-deploying-simple-erc777-contract-with-truffle-and-ganache/1588/13
@@ -50,6 +54,7 @@ module.exports = async function (deployer, network) {
     const erc20Tokens = await getERC20Tokens();
     console.log("=========================getERC20Tokens============================");
     const chainLinkAggregators = await getChainLinkAggregators();
+    console.log(chainLinkAggregators);
     console.log("=========================getChainLinkAggregators============================");
     const cTokens = await getCTokens(erc20Tokens);
     console.log("=========================getCTokens============================");
@@ -103,6 +108,8 @@ module.exports = async function (deployer, network) {
     const initialize_data = savingAccount.contract.methods
         .initialize(erc20Tokens, cTokens, globalConfig.address)
         .encodeABI();
+    console.log(erc20Tokens);
+    console.log(cTokens);
     console.log("=========================initialize_data============================");
 
     const proxyAdmin = await ProxyAdmin.deployed();
@@ -114,6 +121,9 @@ module.exports = async function (deployer, network) {
     console.log("=========================accountsProxy.initialize============================");
     await bankProxy.initialize(bank.address, proxyAdmin.address, bank_initialize_data);
     console.log("=========================bankProxy.initialize============================");
+
+    await addAndSetupFINToken(tokenInfoRegistry);
+    console.log("=========================setup FIN Token============================");
 
     console.log("GlobalConfig:", globalConfig.address);
     console.log("Constant:", constant.address);
@@ -138,6 +148,7 @@ const initializeTokenInfoRegistry = async (
             const isSupportedOnCompound = token.isSupportedByCompound;
             const cToken = cTokens[i];
             const chainLinkOracle = chainLinkAggregators[i];
+            console.log("adding token", token.symbol);
             await tokenInfoRegistry.addToken(
                 tokenAddr,
                 decimals,
@@ -214,12 +225,8 @@ const getCTokens = async (erc20Tokens) => {
     await Promise.all(
         tokenData.tokens.map(async (token, index) => {
             let addr;
-            if (network == "ropsten" || network == "ropsten-fork") {
-                addr = token.ropsten.cTokenAddress;
-            } else if (network == "kovan" || network == "kovan-fork") {
+            if (network == "kovan" || network == "kovan-fork") {
                 addr = token.kovan.cTokenAddress;
-            } else if (network == "rinkeby" || network == "rinkeby-fork") {
-                addr = token.rinkeby.cTokenAddress;
             } else if (network == "mainnet" || network == "mainnet-fork") {
                 addr = token.mainnet.cTokenAddress;
             } else {
@@ -248,12 +255,8 @@ const getERC20Tokens = async () => {
     await Promise.all(
         tokenData.tokens.map(async (token) => {
             let addr;
-            if (network == "ropsten" || network == "ropsten-fork") {
-                addr = token.ropsten.tokenAddress;
-            } else if (network == "kovan" || network == "kovan-fork") {
+            if (network == "kovan" || network == "kovan-fork") {
                 addr = token.kovan.tokenAddress;
-            } else if (network == "rinkeby" || network == "rinkeby-fork") {
-                addr = token.rinkeby.tokenAddress;
             } else if (network == "mainnet" || network == "mainnet-fork") {
                 addr = token.mainnet.tokenAddress;
             } else {
@@ -272,25 +275,93 @@ const getChainLinkAggregators = async () => {
     // const network = process.env.NETWORK;
     const network = net_work;
 
-    await Promise.all(
-        tokenData.tokens.map(async (token) => {
-            let addr;
-            if (network == "ropsten" || network == "ropsten-fork") {
-                addr = token.ropsten.aggregatorAddress;
-            } else if (network == "kovan" || network == "kovan-fork") {
-                addr = token.kovan.aggregatorAddress;
-            } else if (network == "rinkeby" || network == "rinkeby-fork") {
-                addr = token.rinkeby.aggregatorAddress;
-            } else if (network == "mainnet" || network == "mainnet-fork") {
-                addr = token.mainnet.aggregatorAddress;
-            } else {
-                // network = development || coverage
-                addr = (
-                    await MockChainLinkAggregator.new(token.decimals, new BN(token.latestAnswer))
-                ).address;
-            }
-            aggregators.push(addr);
-        })
-    );
+    const exOracleConf = await getExOracleDataSource();
+    let exOracleAddress = exOracleConf[0];
+    let dataSource = exOracleConf[1];
+
+    // For loop ensures that the deployment order is maintained.
+    // we need to maintain the deployed addresses in order in the `aggregators` array
+    const pairs = tokenData.ExOracle.ExOracleContracts;
+    for (let i = 0; i < pairs.length; i++) {
+        const pair = pairs[i];
+        console.log("deploying ExOracle pair", pair.pairName);
+        const exOracleImplAddress = (
+            await ExOracle.new(exOracleAddress, dataSource, pair.pairName, pair.priceType)
+        ).address;
+        aggregators.push(exOracleImplAddress);
+        console.log("ExOracle pair:", pair.pairName, " deployed with address", exOracleImplAddress);
+    }
+
     return aggregators;
+};
+
+const getExOracleDataSource = async () => {
+    const network = net_work;
+
+    let dummy_Addr = "0x0000000000000000000000000000000000000042";
+    let dummy_Datasource = "0x0000000000000000000000000000000000000041";
+
+    let exOracleAddress;
+    let dataSource;
+
+    if (network == "mainnet" || network == "mainnet-fork") {
+        exOracleAddress = tokenData.ExOracle.mainnet.exOracleAddress;
+        dataSource = tokenData.ExOracle.mainnet.dataSource;
+    } else if (network == "kovan" || network == "kovan-fork") {
+        exOracleAddress = tokenData.ExOracle.testnet.exOracleAddress;
+        dataSource = tokenData.ExOracle.testnet.dataSource;
+    } else if (network == "coverage" || network == "development") {
+        exOracleAddress = (await ExOracleFIN.new(dummy_Addr, dummy_Datasource)).address;
+        dataSource = dummy_Datasource;
+        console.log("exOracleAddress", exOracleAddress);
+        console.log("dataSource", dataSource);
+    }
+    return [exOracleAddress, dataSource];
+};
+
+const addAndSetupFINToken = async (tokenInfoRegistry) => {
+    const finOracleAddress = await deployFINOracle();
+    await addFINTokenSupport(tokenInfoRegistry, finOracleAddress);
+};
+
+// Deploy custom Oracle for FIN token
+const deployFINOracle = async () => {
+    const exOracleConf = await getExOracleDataSource();
+    let exOracleAddress = exOracleConf[0];
+    let dataSource = exOracleConf[1];
+
+    const exOracleFin = await ExOracleFIN.new(exOracleAddress, dataSource);
+    await exOracleFin.setFINPriceInUSD(tokenData.DeFiner.latestAnswer);
+    console.log("FIN price in USD set in Oracle:", (await exOracleFin.finPriceInUSD()).toString());
+    const finOracleAddress = exOracleFin.address;
+    console.log("ExOracleFIN deployed:", finOracleAddress);
+    return finOracleAddress;
+};
+
+// Add FIN token support
+const addFINTokenSupport = async (tokenInfoRegistry, finOracleAddress) => {
+    const network = net_work;
+
+    let tokenAddr;
+    let cTokenAddr;
+
+    if (network == "mainnet" || network == "mainnet-fork") {
+        tokenAddr = tokenData.DeFiner.mainnet.tokenAddress;
+        cTokenAddr = tokenData.DeFiner.mainnet.cTokenAddress;
+    } else if (network == "kovan" || network == "kovan-fork") {
+        tokenAddr = tokenData.DeFiner.testnet.tokenAddress;
+        cTokenAddr = tokenData.DeFiner.testnet.cTokenAddress;
+    } else if (network == "coverage" || network == "development") {
+        tokenAddr = tokenData.DeFiner.testnet.tokenAddress;
+        cTokenAddr = tokenData.DeFiner.testnet.cTokenAddress;
+    }
+
+    await tokenInfoRegistry.addToken(
+        tokenAddr,
+        tokenData.DeFiner.decimals,
+        tokenData.DeFiner.isFeeEnabled,
+        tokenData.DeFiner.isSupportedByCompound,
+        cTokenAddr,
+        finOracleAddress
+    );
 };

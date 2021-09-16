@@ -9,17 +9,24 @@ import "./lib/Utils.sol";
 import "@openzeppelin/upgrades/contracts/Initializable.sol";
 import "./InitializableReentrancyGuard.sol";
 import "./InitializablePausable.sol";
-import { ICToken } from "./compound/ICompound.sol";
-import { ICETH } from "./compound/ICompound.sol";
+import {ICToken} from "./compound/ICompound.sol";
+import {ICETH} from "./compound/ICompound.sol";
 
-contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant, InitializablePausable {
+contract SavingAccount is
+    Initializable,
+    InitializableReentrancyGuard,
+    Constant,
+    InitializablePausable
+{
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
 
     GlobalConfig public globalConfig;
 
-    address public constant FIN_ADDR = 0x054f76beED60AB6dBEb23502178C52d6C5dEbE40;
-    address public constant COMP_ADDR = 0xc00e94Cb662C3520282E6f5717214004A7f26888;
+    // FIN token contract on OEC
+    address public constant FIN_ADDR = 0xFfb7559a201ee93feaa39355f2416193E15434d1;
+    // WePiggy does not have its token ok OEC
+    address public constant COMP_ADDR = 0x0000000000000000000000000000000000000000;
 
     event Transfer(address indexed token, address from, address to, uint256 amount);
     event Borrow(address indexed token, address from, uint256 amount);
@@ -27,7 +34,14 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
     event Deposit(address indexed token, address from, uint256 amount);
     event Withdraw(address indexed token, address from, uint256 amount);
     event WithdrawAll(address indexed token, address from, uint256 amount);
-    event Liquidate(address liquidator, address borrower, address borrowedToken, uint256 repayAmount, address collateralToken, uint256 payAmount);
+    event Liquidate(
+        address liquidator,
+        address borrower,
+        address borrowedToken,
+        uint256 repayAmount,
+        address collateralToken,
+        uint256 payAmount
+    );
     event Claim(address from, uint256 amount);
     event WithdrawCOMP(address beneficiary, uint256 amount);
 
@@ -39,13 +53,18 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
     }
 
     modifier onlyEnabledToken(address _token) {
-        require(globalConfig.tokenInfoRegistry().isTokenEnabled(_token), "The token is not enabled");
+        require(
+            globalConfig.tokenInfoRegistry().isTokenEnabled(_token),
+            "The token is not enabled"
+        );
         _;
     }
 
     modifier onlyAuthorized() {
-        require(msg.sender == address(globalConfig.bank()),
-            "Only authorized to call from DeFiner internal contracts.");
+        require(
+            msg.sender == address(globalConfig.bank()),
+            "Only authorized to call from DeFiner internal contracts."
+        );
         _;
     }
 
@@ -64,20 +83,20 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
         address[] memory _tokenAddresses,
         address[] memory _cTokenAddresses,
         GlobalConfig _globalConfig
-    )
-        public
-        initializer
-    {
+    ) public initializer {
         // Initialize InitializableReentrancyGuard
         super._initialize();
         super._initialize(address(_globalConfig));
 
         globalConfig = _globalConfig;
 
-        require(_tokenAddresses.length == _cTokenAddresses.length, "Token and cToken length don't match.");
-        uint tokenNum = _tokenAddresses.length;
-        for(uint i = 0;i < tokenNum;i++) {
-            if(_cTokenAddresses[i] != address(0x0) && _tokenAddresses[i] != ETH_ADDR) {
+        require(
+            _tokenAddresses.length == _cTokenAddresses.length,
+            "Token and cToken length don't match."
+        );
+        uint256 tokenNum = _tokenAddresses.length;
+        for (uint256 i = 0; i < tokenNum; i++) {
+            if (_cTokenAddresses[i] != address(0x0) && _tokenAddresses[i] != ETH_ADDR) {
                 approveAll(_tokenAddresses[i]);
             }
         }
@@ -98,7 +117,7 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * Get current block number
      * @return the current block number
      */
-    function getBlockNumber() internal view returns (uint) {
+    function getBlockNumber() internal view returns (uint256) {
         return block.number;
     }
 
@@ -108,8 +127,11 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * @param _token token address
      * @param _amount amout of tokens transfer
      */
-    function transfer(address _to, address _token, uint _amount) external onlySupportedToken(_token) onlyEnabledToken(_token) whenNotPaused nonReentrant {
-
+    function transfer(
+        address _to,
+        address _token,
+        uint256 _amount
+    ) external onlySupportedToken(_token) onlyEnabledToken(_token) whenNotPaused nonReentrant {
         globalConfig.bank().newRateIndexCheckpoint(_token);
         uint256 amount = globalConfig.accounts().withdraw(msg.sender, _token, _amount);
         globalConfig.accounts().deposit(_to, _token, amount);
@@ -122,8 +144,13 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * @param _token token address
      * @param _amount amout of tokens to borrow
      */
-    function borrow(address _token, uint256 _amount) external onlySupportedToken(_token) onlyEnabledToken(_token) whenNotPaused nonReentrant {
-
+    function borrow(address _token, uint256 _amount)
+        external
+        onlySupportedToken(_token)
+        onlyEnabledToken(_token)
+        whenNotPaused
+        nonReentrant
+    {
         require(_amount != 0, "Borrow zero amount of token is not allowed.");
 
         globalConfig.bank().borrow(msg.sender, _token, _amount);
@@ -140,7 +167,12 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * @param _amount amout of tokens to borrow
      * @dev If the repay amount is larger than the borrowed balance, the extra will be returned.
      */
-    function repay(address _token, uint256 _amount) public payable onlySupportedToken(_token) nonReentrant {
+    function repay(address _token, uint256 _amount)
+        public
+        payable
+        onlySupportedToken(_token)
+        nonReentrant
+    {
         require(_amount != 0, "Amount is zero");
         SavingLib.receive(globalConfig, _amount, _token);
 
@@ -148,7 +180,7 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
         uint256 amount = globalConfig.bank().repay(msg.sender, _token, _amount);
 
         // Send the remain money back
-        if(amount < _amount) {
+        if (amount < _amount) {
             SavingLib.send(globalConfig, _amount.sub(amount), _token);
         }
 
@@ -160,7 +192,13 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * @param _token the address of the deposited token
      * @param _amount the mount of the deposited token
      */
-    function deposit(address _token, uint256 _amount) public payable onlySupportedToken(_token) onlyEnabledToken(_token) nonReentrant {
+    function deposit(address _token, uint256 _amount)
+        public
+        payable
+        onlySupportedToken(_token)
+        onlyEnabledToken(_token)
+        nonReentrant
+    {
         require(_amount != 0, "Amount is zero");
         SavingLib.receive(globalConfig, _amount, _token);
         globalConfig.bank().deposit(msg.sender, _token, _amount);
@@ -173,7 +211,12 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * @param _token token address
      * @param _amount amount to be withdrawn
      */
-    function withdraw(address _token, uint256 _amount) external onlySupportedToken(_token) whenNotPaused nonReentrant {
+    function withdraw(address _token, uint256 _amount)
+        external
+        onlySupportedToken(_token)
+        whenNotPaused
+        nonReentrant
+    {
         require(_amount != 0, "Amount is zero");
         uint256 amount = globalConfig.bank().withdraw(msg.sender, _token, _amount);
         SavingLib.send(globalConfig, amount, _token);
@@ -185,28 +228,57 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * Withdraw all tokens from the saving pool.
      * @param _token the address of the withdrawn token
      */
-    function withdrawAll(address _token) external onlySupportedToken(_token) whenNotPaused nonReentrant {
-
+    function withdrawAll(address _token)
+        external
+        onlySupportedToken(_token)
+        whenNotPaused
+        nonReentrant
+    {
         // Sanity check
-        require(globalConfig.accounts().getDepositPrincipal(msg.sender, _token) > 0, "Token depositPrincipal must be greater than 0");
+        require(
+            globalConfig.accounts().getDepositPrincipal(msg.sender, _token) > 0,
+            "Token depositPrincipal must be greater than 0"
+        );
 
         // Add a new checkpoint on the index curve.
         globalConfig.bank().newRateIndexCheckpoint(_token);
 
         // Get the total amount of token for the account
-        uint amount = globalConfig.accounts().getDepositBalanceCurrent(_token, msg.sender);
+        uint256 amount = globalConfig.accounts().getDepositBalanceCurrent(_token, msg.sender);
 
         uint256 actualAmount = globalConfig.bank().withdraw(msg.sender, _token, amount);
-        if(actualAmount != 0) {
+        if (actualAmount != 0) {
             SavingLib.send(globalConfig, actualAmount, _token);
         }
         emit WithdrawAll(_token, msg.sender, actualAmount);
     }
 
-    function liquidate(address _borrower, address _borrowedToken, address _collateralToken) public onlySupportedToken(_borrowedToken) onlySupportedToken(_collateralToken) whenNotPaused nonReentrant {
-        (uint256 repayAmount, uint256 payAmount) = globalConfig.accounts().liquidate(msg.sender, _borrower, _borrowedToken, _collateralToken);
+    function liquidate(
+        address _borrower,
+        address _borrowedToken,
+        address _collateralToken
+    )
+        public
+        onlySupportedToken(_borrowedToken)
+        onlySupportedToken(_collateralToken)
+        whenNotPaused
+        nonReentrant
+    {
+        (uint256 repayAmount, uint256 payAmount) = globalConfig.accounts().liquidate(
+            msg.sender,
+            _borrower,
+            _borrowedToken,
+            _collateralToken
+        );
 
-        emit Liquidate(msg.sender, _borrower, _borrowedToken, repayAmount, _collateralToken, payAmount);
+        emit Liquidate(
+            msg.sender,
+            _borrower,
+            _borrowedToken,
+            repayAmount,
+            _collateralToken,
+            payAmount
+        );
     }
 
     /**
@@ -214,11 +286,15 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
      * @param _token token address
      * @param _amount amount of token
      */
-    function fromCompound(address _token, uint _amount) external onlyAuthorized {
-        require(ICToken(globalConfig.tokenInfoRegistry().getCToken(_token)).redeemUnderlying(_amount) == 0, "redeemUnderlying failed");
+    function fromCompound(address _token, uint256 _amount) external onlyAuthorized {
+        require(
+            ICToken(globalConfig.tokenInfoRegistry().getCToken(_token)).redeemUnderlying(_amount) ==
+                0,
+            "redeemUnderlying failed"
+        );
     }
 
-    function toCompound(address _token, uint _amount) external onlyAuthorized {
+    function toCompound(address _token, uint256 _amount) external onlyAuthorized {
         address cToken = globalConfig.tokenInfoRegistry().getCToken(_token);
         if (Utils._isETH(address(globalConfig), _token)) {
             ICETH(cToken).mint.value(_amount)();
@@ -228,7 +304,7 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
         }
     }
 
-    function() external payable{}
+    function() external payable {}
 
     /**
      * An account claim all mined FIN token
@@ -250,12 +326,15 @@ contract SavingAccount is Initializable, InitializableReentrancyGuard, Constant,
     /**
      * Withdraw COMP token to beneficiary
      */
+    // NOTICE: No token for WePiggy on OEC
+    /*
     function withdrawCOMP(address _beneficiary) external onlyOwner {
         uint256 compBalance = IERC20(COMP_ADDR).balanceOf(address(this));
         IERC20(COMP_ADDR).safeTransfer(_beneficiary, compBalance);
 
         emit WithdrawCOMP(_beneficiary, compBalance);
     }
+    */
 
     function version() public pure returns(string memory) {
         return "v1.2.0";

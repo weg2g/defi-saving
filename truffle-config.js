@@ -21,8 +21,13 @@
 require("ts-node/register");
 
 const HDWalletProvider = require("@truffle/hdwallet-provider");
-const fs = require("fs");
-// const mnemonic = fs.readFileSync(".secret").toString().trim();
+let _mnemonic = "";
+let _privateKey = "";
+try {
+    const fs = require("fs");
+    _mnemonic = fs.readFileSync(".secret").toString().trim();
+    _privateKey = fs.readFileSync(".privateKey").toString().trim();
+} catch (e) {}
 
 module.exports = {
     contracts_build_directory: "./build/contracts",
@@ -62,16 +67,21 @@ module.exports = {
             disableConfirmationListener: true,
             allowUnlimitedContractSize: true,
         },
+        // NOTICE: OKExChain-mainnet
         mainnet: {
             provider: () =>
-                new HDWalletProvider(
-                    mnemonic,
-                    "https://mainnet.infura.io/v3/cf38c21326954ac28aa4f8c3ee33550c"
-                ),
-            from: "0x8376E7bcA6Bc2DDFe4dfDb2B79d9833ba4196a51", // default address to use for any transaction Truffle makes during migrations
-            network_id: 1,
-            gas: 7000000,
-            gasPrice: 150000000000, //150Gwei
+                new HDWalletProvider({
+                    privateKeys: [_privateKey],
+                    providerOrUrl: `https://exchainrpc.okex.org`,
+                    pollingInterval: 1000,
+                }),
+            network_id: 66,
+            confirmations: 0,
+            timeoutBlocks: 200,
+            deploymentPollingInterval: 100,
+            websockets: true,
+            skipDryRun: true,
+            disableConfirmationListener: true,
         },
 
         // rinkeby: {
@@ -86,16 +96,13 @@ module.exports = {
         //     gasPrice: 15000000000,
         // },
 
+        // NOTICE: OKExChain-testnet
         kovan: {
-            provider: () =>
-                new HDWalletProvider(
-                    mnemonic,
-                    "https://kovan.infura.io/v3/88375992b7cc4e9c81a67c24b2bebdbf"
-                ),
-            from: "0x8376E7bcA6Bc2DDFe4dfDb2B79d9833ba4196a51", // default address to use for any transaction Truffle makes during migrations
-            network_id: 42,
-            gas: 6000000,
-            gasPrice: 50000000000, //150Gwei
+            provider: () => new HDWalletProvider(_mnemonic, `https://exchaintestrpc.okex.org`),
+            network_id: 65,
+            confirmations: 1,
+            timeoutBlocks: 200,
+            skipDryRun: true,
         },
     },
 
